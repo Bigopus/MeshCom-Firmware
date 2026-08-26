@@ -67,6 +67,7 @@ lv_obj_t    *setup_aprsgroup;
 lv_obj_t    *setup_aprssymbol;
 lv_obj_t    *setup_stone;
 lv_obj_t    *setup_mtone;
+lv_obj_t    *setup_dmtone;
 lv_obj_t    *setup_name;
 lv_obj_t    *setup_comment;
 lv_obj_t    *setup_wifissid;
@@ -250,7 +251,7 @@ static void bubble_delete_event_cb(lv_event_t * e);
 static void ensure_msg_styles(void);
 static String build_timestamp_string(void);
 static bool is_numeric_string(const String &value);
-static void msg_focus_and_alert(bool bWithAudio);
+static void msg_focus_and_alert(bool bWithAudio, const String &destination_call = "");
 // static void update_header_locator_label(void);
 static bool compute_locator_from_settings(char *buffer, size_t len);
 static bool compute_maidenhead_locator(double lat, double lon, char *buffer, size_t len);
@@ -1287,8 +1288,30 @@ void setDisplayLayout(lv_obj_t *parent)
     lv_obj_add_style(setup_mtone, &ta_style, LV_PART_MAIN);
     lv_obj_add_style(setup_mtone, &ta_input_cursor, LV_PART_CURSOR | LV_STATE_FOCUSED);
 
+    // DM-Tone (eigener Ton fuer Direktnachrichten ans eigene Rufzeichen)
+    lv_obj_t * setup_line_dmtone = SET_new_line(t1, setup_line_messagetone, 0);
+
+    lv_obj_t * setup_dmtone_label = lv_label_create(setup_line_dmtone);
+    lv_obj_align(setup_dmtone_label, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_set_width(setup_dmtone_label, 75);
+    lv_label_set_text(setup_dmtone_label, "DM.Tone ");
+    lv_obj_set_style_text_align(setup_dmtone_label, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
+
+    setup_dmtone = lv_textarea_create(setup_line_dmtone);
+    lv_textarea_set_one_line(setup_dmtone, true);
+    lv_textarea_set_text_selection(setup_dmtone, false);
+    lv_obj_align(setup_dmtone, LV_ALIGN_LEFT_MID, 75, 0);
+    lv_obj_set_size(setup_dmtone, 220, 35);
+    lv_obj_set_style_pad_all(setup_dmtone, 2, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(setup_dmtone, 8, LV_PART_MAIN);
+    lv_obj_set_scrollbar_mode(setup_dmtone, LV_SCROLLBAR_MODE_AUTO);
+    lv_textarea_set_text(setup_dmtone, "");
+    lv_textarea_set_max_length(setup_dmtone, 100);
+    lv_obj_add_style(setup_dmtone, &ta_style, LV_PART_MAIN);
+    lv_obj_add_style(setup_dmtone, &ta_input_cursor, LV_PART_CURSOR | LV_STATE_FOCUSED);
+
     // Line Persist
-    lv_obj_t * setup_line_persist = SET_new_line(t1, setup_line_messagetone, 5);
+    lv_obj_t * setup_line_persist = SET_new_line(t1, setup_line_dmtone, 5);
 
     lv_obj_t * setup_save_label = lv_label_create(setup_line_persist);
     lv_obj_align(setup_save_label, LV_ALIGN_LEFT_MID, 0, 0);
@@ -3827,6 +3850,7 @@ void tdeck_refresh_SET_view()
 
     lv_textarea_set_text(setup_stone, meshcom_settings.node_audio_start.c_str());
     lv_textarea_set_text(setup_mtone, meshcom_settings.node_audio_msg.c_str());
+    lv_textarea_set_text(setup_dmtone, meshcom_settings.node_audio_dm.c_str());
     lv_textarea_set_text(setup_name, meshcom_settings.node_name);
     lv_textarea_set_text(setup_comment, meshcom_settings.node_atxt);
     lv_textarea_set_text(setup_wifissid, meshcom_settings.node_ssid);
@@ -3938,7 +3962,117 @@ void tdeck_refresh_SET_view()
 
 char ctrack[300];
 
-static void msg_focus_and_alert(bool bWithAudio)
+/**
+ * waehlt und spielt den passenden Benachrichtigungston fuer eine eingehende Nachricht,
+ * abhaengig vom Ziel (destination_call) der Nachricht:
+ *  - Direktnachricht ans eigene Rufzeichen  -> node_audio_dm
+ *  - Nachricht an eine der 6 eingerichteten Gruppen (setup_grc0..setup_grc5 / node_gcb)
+ *                                            -> erste Datei im SD-Wurzelverzeichnis, deren
+ *                                               Name mit "<Slot>_" beginnt (Slot = Position
+ *                                               der Gruppe in den Einstellungen, 1-6), z.B.
+ *                                               "1_bloob.mp3" fuer GRC0, "2_iiiup.mp3" fuer
+ *                                               GRC1 usw. - der Rest des Dateinamens ist frei waehlbar
+ *  - Broadcast ("*") oder fremde/unbekannte Gruppe -> node_audio_msg (bisheriger Standardton)
+ * Wird fuer den Slot keine passende Datei gefunden, faellt es auf node_audio_msg
+ * und danach auf den CW-Piepton zurueck.
+ * (Stummschaltung generell weiterhin ueber den bestehenden MUTE-Schalter/node_mute,
+ * der bereits in play_file_from_sd()/play_cw() beruecksichtigt wird.)
+ */
+static String find_group_sound_file(int slot)
+{
+    if(!bSDDected)
+        return "";
+
+    String prefix = String(slot) + "_";
+    String found = "";
+
+    File root = SD.open("/");
+    if(!root || !root.isDirectory())
+        return "";
+
+    File entry = root.openNextFile();
+    while(entry)
+    {
+        if(!entry.isDirectory())
+        {
+            const char * nm = entry.name();
+            const char * base = strrchr(nm, '/');
+            base = base ? base + 1 : nm;
+
+            if(String(base).startsWith(prefix))
+            {
+                found = "/" + String(base);
+                break;
+            }
+        }
+        entry = root.openNextFile();
+    }
+    root.close();
+
+    return found;
+}
+
+static void play_notification_sound(const String &destination_call)
+{
+    String local_call = String(meshcom_settings.node_call);
+    local_call.trim();
+
+    String dest = destination_call;
+    dest.trim();
+
+    String soundFile = meshcom_settings.node_audio_msg;
+
+    if(dest.length() > 0 && local_call.length() > 0 && dest.equalsIgnoreCase(local_call))
+    {
+        // Direktnachricht an das eigene Rufzeichen
+        soundFile = meshcom_settings.node_audio_dm;
+    }
+    else
+    {
+        int group = CheckGroup(dest);
+        if(group > 0)
+        {
+            bool bMatched = false;
+            for(int ig = 0; ig < 6; ig++)
+            {
+                if(meshcom_settings.node_gcb[ig] == group)
+                {
+                    bMatched = true;
+                    String groupFile = find_group_sound_file(ig + 1);
+                    if(groupFile.length() > 0)
+                        soundFile = groupFile;
+                    // sonst: keine "<Slot>_..."-Datei auf SD -> soundFile bleibt node_audio_msg
+                    break;
+                }
+            }
+            // fremde/nicht eingerichtete Gruppe -> soundFile bleibt node_audio_msg
+            if(bDEBUG)
+                Serial.printf("[AUDIO]..group-msg dest='%s' group=%i matched=%s -> %s\n",
+                    dest.c_str(), group, bMatched ? "yes" : "no", soundFile.c_str());
+        }
+    }
+
+    if(soundFile.length() == 0)
+        soundFile = meshcom_settings.node_audio_msg;
+
+    if(bDEBUG)
+    {
+        bool bExists = bSDDected && (SD.exists(soundFile.c_str()) || SD.exists((soundFile + ".mp3").c_str()));
+        Serial.printf("[AUDIO]..notification: dest='%s' soundFile='%s' existsOnSD=%s\n",
+            dest.c_str(), soundFile.c_str(), bExists ? "yes" : "no");
+    }
+
+    if(!play_file_from_sd(soundFile.c_str(), 12))
+    {
+        // Fallback-Kette: eigener/Gruppen-Ton fehlt auf SD -> normalen Nachrichtenton versuchen
+        if(soundFile == meshcom_settings.node_audio_msg || !play_file_from_sd(meshcom_settings.node_audio_msg.c_str(), 12))
+        {
+            play_cw('r');
+        }
+    }
+}
+
+static void msg_focus_and_alert(bool bWithAudio, const String &destination_call)
 {
     if (bDEBUG)
         Serial.println("[TDECK]...msg_focus_and_alert: Called");
@@ -3967,11 +4101,8 @@ static void msg_focus_and_alert(bool bWithAudio)
         if (bDEBUG)
             Serial.println("[TDECK]...msg_focus_and_alert: Playing audio...");
 
-        if (!play_file_from_sd(meshcom_settings.node_audio_msg.c_str(), 12))
-        {
-            play_cw('r');
-        }
-        
+        play_notification_sound(destination_call);
+
         if (bDEBUG)
             Serial.println("[TDECK]...msg_focus_and_alert: Audio finished.");
     }
@@ -4187,12 +4318,12 @@ void tdeck_add_MSG(aprsMessage aprsmsg, bool bWithAudio)
     bubble.body = payload;
 
     msg_tabs_add_message(conversation, bubble);
-    
+
     // Only focus and alert if NOT loading from file
     if (!loading_messages_from_file) {
-        msg_focus_and_alert(bWithAudio);
+        msg_focus_and_alert(bWithAudio, aprsmsg.msg_destination_call);
     }
-}                  
+}
 
 /**
  * adds an message to the MSG view
@@ -4228,10 +4359,10 @@ void tdeck_add_MSG(String callsign, String path, String message, bool bWithAudio
         conversation = tab_override;
 
     msg_tabs_add_message(conversation, bubble);
-    
+
     // Only focus and alert if NOT loading from file
     if (!loading_messages_from_file) {
-        msg_focus_and_alert(bWithAudio);
+        msg_focus_and_alert(bWithAudio, callsign);
     }
 }
 

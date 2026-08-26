@@ -555,6 +555,13 @@ void btn_event_handler_setup(lv_event_t * e)
             meshcom_settings.node_audio_msg = strVar;
         }
 
+        // DM TONE (eigener Ton fuer Direktnachrichten ans eigene Rufzeichen)
+        strVar = lv_textarea_get_text(setup_dmtone);
+        if (meshcom_settings.node_audio_dm.compareTo(strVar) != 0)
+        {
+            meshcom_settings.node_audio_dm = strVar;
+        }
+
         // NAME
         strVar = lv_textarea_get_text(setup_name);
         char cNewName[20] = {0};

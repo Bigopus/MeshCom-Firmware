@@ -36,6 +36,7 @@ extern lv_obj_t    *setup_aprsgroup;
 extern lv_obj_t    *setup_aprssymbol;
 extern lv_obj_t    *setup_stone;
 extern lv_obj_t    *setup_mtone;
+extern lv_obj_t    *setup_dmtone;
 extern lv_obj_t    *setup_name;
 extern lv_obj_t    *setup_comment;
 extern lv_obj_t    *setup_wifissid;

@@ -225,6 +225,7 @@ struct s_meshcom_settings
 	int node_map = 0;
 	String node_audio_start = "/";
 	String node_audio_msg = "/";
+	String node_audio_dm = "/";	// eigener Ton fuer Direktnachrichten ans eigene Rufzeichen
 	bool node_keyboardlock = false;
 	bool node_backlightlock = false;
 	bool node_kbllightlock = false;

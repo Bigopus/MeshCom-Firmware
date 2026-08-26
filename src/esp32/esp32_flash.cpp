@@ -192,6 +192,7 @@ void init_flash(void)
     meshcom_settings.node_map = preferences.getInt("node_map", 0);
     meshcom_settings.node_audio_start = preferences.getString("node_audstart", "/");
     meshcom_settings.node_audio_msg = preferences.getString("node_audmsg", "/");
+    meshcom_settings.node_audio_dm = preferences.getString("node_auddm", "/");
     meshcom_settings.node_keyboardlock = preferences.getBool("node_kblock", false);
     meshcom_settings.node_backlightlock = preferences.getBool("node_bllock", false);
     meshcom_settings.node_kbllightlock = preferences.getBool("node_kllock", false);
@@ -466,6 +467,7 @@ void save_settings(void)
     preferences.putInt("node_map", meshcom_settings.node_map);
     preferences.putString("node_audstart", meshcom_settings.node_audio_start);
     preferences.putString("node_audmsg", meshcom_settings.node_audio_msg);
+    preferences.putString("node_auddm", meshcom_settings.node_audio_dm);
     preferences.putBool("node_kblock", meshcom_settings.node_keyboardlock);
     preferences.putBool("node_bllock", meshcom_settings.node_backlightlock);
     preferences.putBool("node_kllock", meshcom_settings.node_kbllightlock);
